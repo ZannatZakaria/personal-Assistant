@@ -4,11 +4,12 @@
   <meta charset="UTF-8">
   <title>Personal Assistant Web App</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
+  <style id="theme-style">
     :root {
       --bg: #f5f5f5;
       --text: #333;
       --primary: #4CAF50;
+      --card: #fff;
     }
 
     body {
@@ -18,11 +19,15 @@
       color: var(--text);
     }
 
-    header, nav {
+    header {
       background: var(--primary);
       color: white;
       padding: 1rem;
       text-align: center;
+    }
+
+    .theme-selector {
+      margin-top: 10px;
     }
 
     .container {
@@ -33,7 +38,7 @@
     }
 
     .module {
-      background: white;
+      background: var(--card);
       border-radius: 8px;
       box-shadow: 0 0 10px rgba(0,0,0,0.1);
       margin: 1rem;
@@ -55,6 +60,18 @@
       height: 200px;
       margin-top: 1rem;
     }
+
+    .heatmap-cell {
+      width: 14px;
+      height: 14px;
+      display: inline-block;
+      margin: 1px;
+      background-color: #e0e0e0;
+    }
+
+    .heatmap-cell.active {
+      background-color: #4CAF50;
+    }
   </style>
 </head>
 <body>
@@ -62,6 +79,14 @@
 <header>
   <h1>Personal Assistant Dashboard</h1>
   <p>Your tasks, budget, notes, and more in one place</p>
+  <div class="theme-selector">
+    Theme:
+    <select onchange="setTheme(this.value)">
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+      <option value="sepia">Sepia</option>
+    </select>
+  </div>
 </header>
 
 <main class="container">
@@ -71,6 +96,8 @@
     <input id="task-input" placeholder="Add a new task...">
     <button onclick="addTask()">Add Task</button>
     <ul id="task-list"></ul>
+    <h4>Productivity Heatmap</h4>
+    <div id="heatmap"></div>
   </section>
 
   <!-- Budget Tracker -->
@@ -80,7 +107,7 @@
     <input id="expense" type="number" placeholder="Expense">
     <button onclick="updateBudget()">Update Budget</button>
     <p id="budget-summary">No data yet.</p>
-    <canvas id="budgetChart"></canvas>
+    <canvas id="budgetChart" width="300" height="200"></canvas>
   </section>
 
   <!-- Notes -->
@@ -94,24 +121,61 @@
   <!-- Daily Recommendations -->
   <section class="module" id="recommendations">
     <h2>Daily Recommendation</h2>
-    <p id="daily-recommendation">Start your day by clearing one high-priority task!</p>
+    <p id="daily-recommendation">Start your day by completing one high-priority task!</p>
   </section>
 </main>
 
 <script>
-  // ========== Tasks ==========
+  // ===== THEME CUSTOMIZATION =====
+  const themes = {
+    light: {
+      '--bg': '#f5f5f5',
+      '--text': '#333',
+      '--primary': '#4CAF50',
+      '--card': '#fff'
+    },
+    dark: {
+      '--bg': '#1e1e1e',
+      '--text': '#f0f0f0',
+      '--primary': '#333',
+      '--card': '#2c2c2c'
+    },
+    sepia: {
+      '--bg': '#f4ecd8',
+      '--text': '#5b4636',
+      '--primary': '#a67c52',
+      '--card': '#fbf5e6'
+    }
+  };
+
+  function setTheme(theme) {
+    const root = document.documentElement;
+    const colors = themes[theme];
+    Object.keys(colors).forEach(k => root.style.setProperty(k, colors[k]));
+    localStorage.setItem('theme', theme);
+  }
+
+  function loadTheme() {
+    const saved = localStorage.getItem('theme') || 'light';
+    document.querySelector('select').value = saved;
+    setTheme(saved);
+  }
+
+  // ===== TASK MODULE =====
   const taskInput = document.getElementById('task-input');
   const taskList = document.getElementById('task-list');
+  const heatmap = document.getElementById('heatmap');
 
   function loadTasks() {
     const tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
     taskList.innerHTML = '';
     tasks.forEach((task, i) => {
       const li = document.createElement('li');
-      li.textContent = task;
+      li.textContent = task.text;
       li.onclick = () => {
         tasks.splice(i, 1);
         localStorage.setItem('tasks', JSON.stringify(tasks));
+        updateHeatmap();
         loadTasks();
       };
       taskList.appendChild(li);
@@ -122,15 +186,36 @@
     const task = taskInput.value.trim();
     if (!task) return;
     const tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
-    tasks.push(task);
+    tasks.push({ text: task, date: new Date().toISOString().split('T')[0] });
     localStorage.setItem('tasks', JSON.stringify(tasks));
     taskInput.value = '';
+    updateHeatmap();
     loadTasks();
   }
 
-  // ========== Budget ==========
+  function updateHeatmap() {
+    const days = 30;
+    const tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
+    const map = {};
+    tasks.forEach(t => {
+      map[t.date] = (map[t.date] || 0) + 1;
+    });
+    heatmap.innerHTML = '';
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const d = date.toISOString().split('T')[0];
+      const cell = document.createElement('div');
+      cell.className = 'heatmap-cell';
+      if (map[d]) cell.classList.add('active');
+      heatmap.appendChild(cell);
+    }
+  }
+
+  // ===== BUDGET MODULE =====
   const budgetSummary = document.getElementById('budget-summary');
-  const ctx = document.getElementById('budgetChart').getContext('2d');
+  const canvas = document.getElementById('budgetChart');
+  const ctx = canvas.getContext('2d');
 
   function updateBudget() {
     const income = parseFloat(document.getElementById('income').value) || 0;
@@ -145,9 +230,18 @@
   function renderBudget() {
     const data = JSON.parse(localStorage.getItem('budget') || '{"income":0,"expense":0}');
     budgetSummary.textContent = `Income: €${data.income} | Expenses: €${data.expense}`;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const total = data.income + data.expense;
+    if (total === 0) return;
+    const incomeWidth = (data.income / total) * canvas.width;
+    ctx.fillStyle = "#4CAF50";
+    ctx.fillRect(0, 50, incomeWidth, 30);
+    ctx.fillStyle = "#f44336";
+    ctx.fillRect(incomeWidth, 50, canvas.width - incomeWidth, 30);
   }
 
-  // ========== Notes ==========
+  // ===== NOTES MODULE =====
   const noteText = document.getElementById('note-text');
   const noteList = document.getElementById('note-list');
 
@@ -171,10 +265,12 @@
     loadNotes();
   }
 
-  // ========== Init ==========
+  // ===== INIT =====
+  loadTheme();
   loadTasks();
   renderBudget();
   loadNotes();
+  updateHeatmap();
 </script>
 
 </body>
